@@ -19,7 +19,7 @@ class AllocIn(BaseModel):
 class MovementIn(BaseModel):
     reference: str = Field(min_length=3, max_length=80)
     amount: int = Field(gt=0)
-    date: str = Field(min_length=8, max_length=10)
+    date: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
     bank_name: str = ""
 
 

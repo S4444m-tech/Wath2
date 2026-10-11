@@ -146,7 +146,7 @@ async def reconcile(job):
         elif not await _mapping(tenant["id"], job["kind"], job["ref_id"]):
             found_all = False
     status = "done" if found_all else "queued"
-    await db.jobs.update_one({"id": job["id"]}, {"$set": {"status": status, "last_error": None if found_all else "not found in Daftra; re-queued", "updated_at": iso()}})
+    await db.jobs.update_one({"id": job["id"]}, {"$set": {"status": status, "last_error": None if found_all else "document matched; pending entries re-queued for posting", "updated_at": iso()}})
     await refresh_tx_sync(job["tenant_id"], job["transaction_id"])
     return status
 

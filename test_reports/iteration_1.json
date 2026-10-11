@@ -1,0 +1,46 @@
+{
+  "summary": "Comprehensive backend + frontend smoke testing for Wathiq (Arabic RTL multi-tenant SaaS). Wrote pytest regression suite covering 33 scenarios across auth/lockout, CSRF, idempotency, transactions, public OTP+upload+delegate, review decisions (confirm/partial/paid/overpaid/not_seen/needs_attention), duplicate reference (case/space insensitive), stale version concurrency, movement reversal, tenant isolation, manager user admin + IBAN validation, superadmin tenant create/suspend, Daftra reconcile in timeout mode, and signed file URL scoping. All 33 backend tests pass. Frontend smoke: all 4 role-based redirects correct (employee→/app/transactions, supervisor→/app/reviews, manager→/app/transactions, superadmin→/admin/tenants), wrong-PIN Arabic error shown, mobile 390px layout renders cleanly with on-screen PIN keypad.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "/api/jobs/{job_id}/reconcile", "issue": "In Daftra 'timeout' mode, _ensure_document raises timeout BEFORE the payment create call executes in _run, so the payment entry is never written to daftra_mock. A single reconcile call therefore only recovers the document mapping and returns status='queued' (needing a second worker cycle + reconcile to reach 'done'). Behavior is safe (no duplicate posting) but the UX for operators may be confusing — consider showing the partial reconcile state in the UI or auto-chaining the second cycle. Test accepts both outcomes."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/conftest.py",
+    "/app/backend/tests/test_wathiq_api.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "(Minor) Consider documenting / improving the two-cycle reconcile UX when Daftra connector is in 'timeout' mode so operators understand why status may remain 'queued' after one reconcile.",
+    "(Nit) MovementIn.date uses only length validation (8-10 chars) — not a strict date pattern. Non-dates like 'xxxxxxxx' would currently be accepted. Consider pattern '^\\d{4}-\\d{2}-\\d{2}$'."
+  ],
+  "critical_code_review_comments": [
+    "Scoped.insert uses doc.setdefault for id/created_at then inserts dict(doc) — the inserted document passes through fine, _id is excluded in find. Good.",
+    "routes_review._confirm uses CAS claim (attachments.version + status check) + compensating rollback instead of multi-doc transactions — correct choice since MongoDB is standalone (no replica set). Verified concurrent/stale version returns 409.",
+    "attachments.store_upload performs scan AFTER sha256 duplicate check but BEFORE persisting bytes to GridFS — good quarantine ordering. However duplicate detection is per-transaction (sha256) which is correct; cross-tenant leakage not possible due to Scoped.",
+    "routes_public.verify_otp: public session cookie 'pub_session' is set with the SAME CSRF cookie as the staff session (issue_csrf). If a staff user opens a public link in the same browser, the public endpoint's check_csrf would succeed with staff's csrf — but public_session() looks up link id/tenant from the JWT payload independently, so no privilege escalation. OK.",
+    "routes_tx.events: SSE loop never yields the stored event payload if transaction_id filter rejects — just continues. Timeout emits ping. Good.",
+    "File sizes are all <260 lines each — no large-file split needed.",
+    "No hardcoded URLs in backend; CORS from env; MONGO_URL from env — compliant.",
+    "attachments.signed_url returns a RELATIVE path (/api/files/...). Frontend must prefix with REACT_APP_BACKEND_URL. Verified working via test which uses BASE_URL + url.",
+    "routes_review._confirm pre-check 'sum(allocations) == movement.amount' is correct but does not enforce per-tx remaining caps at API level — supervisor could theoretically allocate more than a tx's remaining to produce overpaid credit intentionally. Ledger math handles it as 'overpaid'. Design choice, acceptable per spec.",
+    "No rate limit on /api/public/links/{token}/otp beyond 5/hr per link — reasonable for mocked demo."
+  ],
+  "updated_files": [
+    "/app/backend/tests/conftest.py",
+    "/app/backend/tests/test_wathiq_api.py"
+  ],
+  "success_rate": {"backend": "100% (33/33)", "frontend": "100% (role redirects, wrong-PIN error, mobile layout all verified)"},
+  "test_credentials": "Used /app/memory/test_credentials.md verbatim (admin/246810, r.manager/135791, r.supervisor/246802, r.employee/314159, j.employee/271828, j.supervisor/161803).",
+  "seed_data_creation": "Each pytest run creates fresh TEST_شركة_<hex> customers and TEST_Tenant-<hex> tenants via /api/admin/tenants. No cleanup needed — all prefixed with TEST_ and unique UUIDs. Session-scoped lockout test uses throwaway username nouser_<hex> to avoid locking seeded users.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend regression suite at /app/backend/tests/test_wathiq_api.py — run with: python -m pytest backend/tests/test_wathiq_api.py -v --junitxml=/app/test_reports/pytest/pytest_results.xml. Uses conftest.py for login helpers. Important: Session default headers must NOT include 'Content-Type: application/json' or multipart uploads will fail — the fixture handles this. Idempotency keys must be >=8 chars. CSRF: pass session.cookies.get('csrf_token') as X-CSRF-Token header. Daftra timeout-mode reconcile may need two cycles (documented above).",
+  "rca of the issue": "No bugs. One minor design observation on Daftra timeout reconcile needing two cycles — root cause: _ensure_document is called first in _run so a timeout there short-circuits the payment create, leaving only the document in daftra_mock. Reconcile recovers the document mapping but not the (never-attempted) payment mapping, so it correctly re-queues. The worker's next pass will create the payment (then timeout again post-upsert), and the next reconcile completes. Safe-by-design — no risk of double posting."
+}
