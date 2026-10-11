@@ -1,0 +1,67 @@
+{
+  "project_name": "وَثيق (Wathiq)",
+  "app_type": "saas_app",
+  "direction": "rtl",
+  "locale": "ar-SA",
+  "theme": "light",
+  "color_palette": {
+    "primary": "#123E52",
+    "primary_hover": "#0e3141",
+    "secondary": "#137C83",
+    "secondary_hover": "#0f6369",
+    "background": "#F5F7FA",
+    "card_background": "#FFFFFF",
+    "text_dark": "#172B36",
+    "text_muted": "#5A6E7F",
+    "border_subtle": "#E2E8F0",
+    "accent_amber": "#D97706",
+    "accent_green": "#059669",
+    "accent_red": "#DC2626",
+    "accent_indigo": "#4F46E5"
+  },
+  "typography": {
+    "heading_font": "'IBM Plex Sans Arabic', 'Noto Sans Arabic', sans-serif",
+    "body_font": "'IBM Plex Sans Arabic', 'Noto Sans Arabic', sans-serif",
+    "google_font_url": "https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@300;400;500;600;700&family=Noto+Sans+Arabic:wght@300;400;500;600;700&display=swap",
+    "h1": "text-3xl sm:text-4xl lg:text-5xl font-bold text-[#172B36] tracking-normal leading-tight",
+    "h2": "text-2xl sm:text-3xl font-bold text-[#172B36] leading-snug",
+    "h3": "text-xl sm:text-2xl font-semibold text-[#172B36] leading-snug",
+    "h4": "text-lg font-semibold text-[#172B36]",
+    "body": "text-base text-[#172B36] leading-relaxed",
+    "small": "text-sm text-[#5A6E7F]",
+    "badge": "text-xs font-medium px-2.5 py-1 rounded-full"
+  },
+  "design_principles": {
+    "rtl_first": "Every flex/grid container must align from right-to-left. Text alignment defaults to right. CSS logical properties or standard RTL flex direction.",
+    "quote_vs_invoice_distinction": "Quotes must feature a prominent Amber / Draft banner with clear text 'عرض سعر - غير مدفوع', whereas confirmed invoices display Emerald Green 'فاتورة ضريبية رسمية' with QR code and VAT tax breakdown.",
+    "dense_industrial_clarity": "High information density for factory operators with clean borders, shadow-sm card framing, clear status badges, and instant IBAN copy actions.",
+    "mobile_first_responsive": "Full layout responsive support for factory floor smartphones and desktop supervisor monitors."
+  },
+  "component_guidelines": {
+    "buttons": "Pill or rounded-lg buttons using #123E52 for primary actions and #137C83 for secondary actions with smooth hover scaling, focus ring #137C83.",
+    "cards": "White background (#FFFFFF) with 1px border (#E2E8F0) and subtle shadow-sm. Header sections with tinted navy or teal accents.",
+    "badges": {
+      "draft": "bg-amber-50 text-amber-700 border border-amber-200",
+      "pending_review": "bg-sky-50 text-sky-700 border border-sky-200",
+      "confirmed": "bg-emerald-50 text-emerald-700 border border-emerald-200",
+      "needs_attention": "bg-rose-50 text-rose-700 border border-rose-200",
+      "daftra_synced": "bg-teal-50 text-teal-700 border border-teal-200"
+    },
+    "pin_keypad": "Large touch targets with tactile feedback for 6-digit PIN entry on mobile and desktop.",
+    "pdf_modal": "Full printable preview overlay styled like an official Saudi VAT invoice/quote document."
+  },
+  "image_urls": {
+    "saudi_factory_banner": "https://images.unsplash.com/photo-1632653323756-a9b6966bc4d1?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDk1Nzh8MHwxfHNlYXJjaHwxfHxzYXVkaSUyMEFyYWJpYSUyMGZhY3RvcnklMjBpbmR1c3RyeSUyMHdhcmVob3VzZSUyMGxvZ2lzdGljc3xlbnwwfHx8fDE3OTE3NTkyNjV8MA&ixlib=rb-4.1.0&q=85",
+    "saudi_executive_portrait": "https://images.unsplash.com/photo-1616147147027-60d49d3582c4?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjY2NzF8MHwxfHNlYXJjaHwxfHxzYXVkaSUyMGJ1c2luZXNzJTIwZXhlY3V0aXZlJTIwbWFuYWdlciUyMHBvcnRyYWl0fGVufDB8fHx8MTc5MTc1OTI2NXww&ixlib=rb-4.1.0&q=85"
+  },
+  "testing_requirements": {
+    "data_testid_rule": "ALL interactive components, submit buttons, PIN inputs, transaction rows, filter controls, status toggles, and public portal forms MUST carry a unique data-testid attribute in kebab-case format."
+  },
+  "UNIVERSAL GUIDELINES FOR MAIN AGENT": [
+    "Ensure RTL layout natively with dir='rtl' on body or root wrapper",
+    "DO NOT use transparent backgrounds for cards or dropdowns",
+    "All interactive elements must include data-testid attributes",
+    "Use exact color values: Primary #123E52, Secondary #137C83, Background #F5F7FA",
+    "Ensure clear visual distinction between Quote (عرض سعر) and Confirmed Invoice (فاتورة ضريبية)"
+  ]
+}

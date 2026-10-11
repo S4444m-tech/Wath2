@@ -1,0 +1,63 @@
+.font-arabic {
+  font-family: "IBM Plex Sans Arabic", "Noto Sans Arabic", system-ui, sans-serif;
+}
+
+.font-mono {
+  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+
+::selection {
+  background: #137c83;
+  color: #fff;
+}
+
+:focus-visible {
+  outline: 2px solid #137c83;
+  outline-offset: 2px;
+}
+
+.fade-up {
+  animation: fadeUp 0.45s ease-out both;
+}
+
+@keyframes fadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.live-dot {
+  animation: pulse 1.8s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}
+
+@media print {
+  .no-print {
+    display: none !important;
+  }
+  body {
+    background: #fff !important;
+  }
+  .doc-sheet {
+    border: none !important;
+    box-shadow: none !important;
+  }
+  .doc-banner {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+}
