@@ -63,7 +63,7 @@ export default function TransactionDetail() {
           <DocumentSheet tx={tx} factory={data.tenant} link={link} />
         </div>
         <div className="space-y-5">
-          <SharePanel tx={tx} link={link} delegations={data.delegations} />
+          <SharePanel tx={tx} link={link} delegations={data.delegations} reload={load} />
           <Card title="رفع إيصال نيابة عن العميل"><UploadBox url={`/transactions/${id}/attachments`} onDone={load} testid="staff-upload" /></Card>
           <DaftraPanel tx={tx} jobs={data.jobs} mappings={data.mappings} user={user} reload={load} />
           <HistoryPanel reviews={data.reviews} versions={data.versions} />

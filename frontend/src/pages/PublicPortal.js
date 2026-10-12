@@ -9,7 +9,6 @@ import { PinInput } from "@/components/PinInput";
 import { DocumentSheet } from "@/components/DocumentSheet";
 import { UploadBox } from "@/components/UploadBox";
 import { StatusBadge } from "@/components/StatusBadge";
-import { CopyText } from "@/components/CopyIban";
 import { Card } from "@/components/Layout";
 
 const Frame = ({ children, factory }) => (
@@ -62,7 +61,7 @@ function OtpStep({ token, meta, onVerified }) {
         </button>
       ) : (
         <div className="mt-6 space-y-4">
-          <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900" data-testid="otp-demo-banner">نسخة تجريبية (MOCKED): البريد غير مفعّل بعد. الرمز: <b className="font-mono text-base" data-testid="otp-demo-code">{sent.demo_code}</b></div>
+          <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900" data-testid="otp-sent-banner">تم إرسال الرمز إلى <span dir="ltr" className="font-mono">{sent.sent_to}</span>. تحقق من صندوق الوارد أو الرسائل غير المرغوبة.</div>
           <PinInput value={code} onChange={setCode} testid="otp-input" autoFocus />
           <button onClick={verify} disabled={busy || code.length !== 6} data-testid="otp-verify-btn" className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#123E52] font-semibold text-white disabled:opacity-50">
             {busy && <Loader2 className="animate-spin" size={18} />} تحقق وافتح المستند
@@ -96,30 +95,33 @@ function StatusCard({ tx }) {
 function Delegate() {
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
-  const [link, setLink] = useState(null);
+  const [sentTo, setSentTo] = useState(null);
+  const [busy, setBusy] = useState(false);
   const go = async (e) => {
     e.preventDefault();
+    setBusy(true);
     try {
       const { data } = await api.post("/public/session/delegate", { email, name });
-      setLink(`${window.location.origin}/p/${data.token}`);
+      setSentTo(data.sent_to);
     } catch (e2) {
       toast.error(errMsg(e2));
+    } finally {
+      setBusy(false);
     }
   };
   return (
     <Card title="تفويض المحاسب" testid="delegate-card">
       <p className="mb-3 text-xs text-[#5A6E7F]">يحصل المحاسب على صلاحية رفع الإيصال لهذه المعاملة فقط — دون الاطلاع على أي معاملات أخرى.</p>
-      {link ? (
+      {sentTo ? (
         <div className="space-y-2" data-testid="delegate-result">
-          <p className="text-xs text-amber-800">نسخة تجريبية (MOCKED): في الإصدار النهائي يُرسل الرابط إلى بريد المحاسب.</p>
-          <div dir="ltr" className="truncate rounded-lg bg-[#F5F7FA] p-2 font-mono text-[11px]" data-testid="delegate-link">{link}</div>
-          <CopyText value={link} label="نسخ رابط المحاسب" testid="copy-delegate-link" />
+          <p className="rounded-lg bg-emerald-50 p-3 text-xs text-emerald-900">تم إرسال رابط المعاملة إلى المحاسب على <span dir="ltr" className="font-mono">{sentTo}</span>.</p>
+          <button type="button" onClick={() => { setSentTo(null); setEmail(""); setName(""); }} className="text-xs text-[#137C83] hover:underline" data-testid="delegate-another-btn">تفويض محاسب آخر</button>
         </div>
       ) : (
         <form onSubmit={go} className="space-y-2">
           <Input placeholder="اسم المحاسب" value={name} onChange={(e) => setName(e.target.value)} data-testid="delegate-name-input" />
           <Input required type="email" dir="ltr" placeholder="accountant@company.sa" value={email} onChange={(e) => setEmail(e.target.value)} data-testid="delegate-email-input" />
-          <button className="flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-[#137C83] text-sm font-semibold text-[#137C83] hover:bg-[#137C83] hover:text-white" data-testid="delegate-submit-btn"><UserPlus size={16} /> تفويض</button>
+          <button className="flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-[#137C83] text-sm font-semibold text-[#137C83] hover:bg-[#137C83] hover:text-white" data-testid="delegate-submit-btn" disabled={busy}>{busy ? <Loader2 size={16} className="animate-spin" /> : <UserPlus size={16} />} تفويض وإرسال الرابط</button>
         </form>
       )}
     </Card>

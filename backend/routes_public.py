@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field
 from core import (db, Scoped, sha256, hash_secret, verify_secret, make_token, read_token, set_cookie, issue_csrf,
                   check_csrf, now, iso, audit, idempotent, save_idempotent)
 from attachments import store_upload, clean_att, signed_url
+import mailer
 
 router = APIRouter(prefix="/api/public")
 SESSION_MIN = 30
@@ -64,10 +65,16 @@ async def request_otp(token: str):
     if await db.otps.count_documents({"link_id": link["id"], "created_at": {"$gt": since}}) >= 5:
         raise HTTPException(429, "تم تجاوز عدد طلبات الرمز. حاول بعد ساعة")
     code = f"{secrets.randbelow(1_000_000):06d}"
-    await db.otps.insert_one({"link_id": link["id"], "code_hash": hash_secret(code), "attempts": 0, "used": False,
-                              "expires_at": iso(now() + timedelta(minutes=10)), "created_at": iso()})
-    # MOCKED delivery: production sends via email channel; demo returns the code to show on screen.
-    return {"sent_to": mask(link["email"]), "demo_code": code, "channel": "email (mocked)"}
+    tenant = await db.tenants.find_one({"id": link["tenant_id"]}, {"_id": 0, "name": 1})
+    tx = await db.transactions.find_one({"tenant_id": link["tenant_id"], "id": link["transaction_id"]}, {"_id": 0, "number": 1})
+    res = await db.otps.insert_one({"link_id": link["id"], "code_hash": hash_secret(code), "attempts": 0, "used": False,
+                                    "expires_at": iso(now() + timedelta(minutes=10)), "created_at": iso()})
+    try:
+        await mailer.send_otp(link["email"], tenant["name"], tx["number"], code)
+    except HTTPException:
+        await db.otps.update_one({"_id": res.inserted_id}, {"$set": {"used": True}})
+        raise
+    return {"sent_to": mask(link["email"]), "channel": "email"}
 
 
 @router.post("/links/{token}/verify")
@@ -118,13 +125,20 @@ async def delegate(body: DelegateIn, request: Request, link=Depends(public_sessi
     if link["role"] != "customer":
         raise HTTPException(403, "التفويض متاح للعميل فقط")
     s = Scoped(link["tenant_id"])
+    email = body.email.lower().strip()
+    if "@" not in email or email == link["email"]:
+        raise HTTPException(400, "بريد المحاسب غير صالح")
+    if await s.count("public_links", {"transaction_id": link["transaction_id"], "role": "accountant"}) >= 5:
+        raise HTTPException(429, "الحد الأقصى 5 محاسبين لكل معاملة")
+    tx = await s.must("transactions", {"id": link["transaction_id"]})
+    tenant = await db.tenants.find_one({"id": s.tid}, {"_id": 0, "name": 1})
     token = secrets.token_urlsafe(32)
+    await mailer.send_delegation(email, tenant["name"], tx, token, tx["customer"]["name"])
     await s.insert("public_links", {"transaction_id": link["transaction_id"], "token": token, "token_hash": sha256(token.encode()),
-                                     "role": "accountant", "email": body.email.lower().strip(), "name": body.name, "active": True,
+                                     "role": "accountant", "email": email, "name": body.name, "active": True,
                                      "delegated_by": link["id"]})
     await audit(s.tid, actor(link), "accountant_delegated", link["transaction_id"], {"email": body.email})
-    # MOCKED: link would be emailed to the accountant; demo returns it.
-    return {"token": token}
+    return {"sent_to": mask(email)}
 
 
 @router.post("/session/logout")

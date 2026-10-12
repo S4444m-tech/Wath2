@@ -5,12 +5,14 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File, Form
 from fastapi.responses import StreamingResponse, Response
 from pydantic import BaseModel, Field
-from core import (db, Scoped, roles, get_user, actor_of, compute_totals, audit, iso, sha256, notify,
+from datetime import timedelta
+from core import (db, Scoped, roles, get_user, actor_of, compute_totals, audit, iso, now, sha256, notify,
                   subscribe, unsubscribe, idempotent, save_idempotent)
 from ledger import recompute
 from attachments import store_upload, clean_att, signed_url, verify_file_sig, read_file
 from urllib.parse import quote as urlquote
 import daftra
+import mailer
 
 router = APIRouter(prefix="/api")
 STAFF = ("employee", "supervisor", "manager")
@@ -86,14 +88,32 @@ async def create_tx(body: TxIn, u=Depends(roles(*STAFF))):
         "number": number, "doc_type": body.doc_type, "customer": body.customer.model_dump(), "items": items,
         "notes": body.notes, "due_date": body.due_date, "subtotal": sub, "vat": vat, "total": total,
         "confirmed": 0, "remaining": total, "credit": 0, "payment_status": "issued", "has_pending": False,
-        "is_advance": False, "version": 1, "needs_rereview": False, "daftra_status": "not_synced",
+        "is_advance": False, "version": 1, "needs_rereview": False, "daftra_status": "not_synced", "email_status": "sending",
         "created_by": actor_of(u), "issued_at": iso(),
     })
     token = secrets.token_urlsafe(32)
     await s.insert("public_links", {"transaction_id": tx["id"], "token": token, "token_hash": sha256(token.encode()),
                                      "role": "customer", "email": body.customer.email.lower(), "active": True})
     await audit(s.tid, actor_of(u), "transaction_issued", tx["id"], {"number": number, "total": total})
+    tenant = await db.tenants.find_one({"id": s.tid}, {"_id": 0, "name": 1})
+    asyncio.create_task(mailer.track_tx_link(s.tid, tx, token, tenant["name"]))
     return await tx_view(s, tx)
+
+
+@router.post("/transactions/{tx_id}/send-link")
+async def resend_link(tx_id: str, u=Depends(roles(*STAFF))):
+    s = Scoped(u["tenant_id"])
+    tx = await s.must("transactions", {"id": tx_id})
+    if u["role"] == "employee" and tx["created_by"]["id"] != u["id"]:
+        raise HTTPException(404, "غير موجود")
+    if tx.get("email_sent_at", "") > iso(now() - timedelta(minutes=1)):
+        raise HTTPException(429, "انتظر دقيقة قبل إعادة الإرسال")
+    link = await s.must("public_links", {"transaction_id": tx_id, "role": "customer"})
+    tenant = await db.tenants.find_one({"id": s.tid}, {"_id": 0, "name": 1})
+    await s.update("transactions", {"id": tx_id}, {"$set": {"email_sent_at": iso(), "email_status": "sending"}})
+    await mailer.track_tx_link(s.tid, tx, link["token"], tenant["name"])
+    await audit(s.tid, actor_of(u), "customer_link_emailed", tx_id)
+    return await tx_view(s, await s.must("transactions", {"id": tx_id}))
 
 
 @router.get("/transactions/{tx_id}")

@@ -1,11 +1,41 @@
 import { QRCodeSVG } from "qrcode.react";
 import { Link } from "react-router-dom";
-import { Printer, ExternalLink } from "lucide-react";
+import { useState } from "react";
+import { Printer, ExternalLink, Mail, Loader2 } from "lucide-react";
+import { toast } from "sonner";
+import { api, errMsg } from "@/lib/api";
 import { Card } from "@/components/Layout";
 import { CopyText } from "@/components/CopyIban";
 import { dt } from "@/lib/format";
 
-export function SharePanel({ tx, link, delegations }) {
+const EMAIL = { sending: ["جارِ إرسال البريد…", "text-sky-700"], sent: ["تم إرسال الرابط بالبريد", "text-emerald-700"], failed: ["فشل إرسال البريد", "text-rose-600"] };
+
+function EmailStatus({ tx, reload }) {
+  const [busy, setBusy] = useState(false);
+  const [label, cls] = EMAIL[tx.email_status] || ["لم يُرسل بالبريد", "text-[#5A6E7F]"];
+  const resend = async () => {
+    setBusy(true);
+    try {
+      await api.post(`/transactions/${tx.id}/send-link`);
+      toast.success("تم إرسال الرابط إلى بريد العميل");
+      reload();
+    } catch (e) {
+      toast.error(errMsg(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-[#E2E8F0] pt-3 text-xs">
+      <span className={cls} data-testid="email-status">{label}{tx.email_status === "failed" && tx.email_error ? ` — ${tx.email_error}` : ""}</span>
+      <button onClick={resend} disabled={busy} data-testid="resend-link-btn" className="inline-flex items-center gap-1 rounded-lg border border-[#E2E8F0] px-3 py-1.5 hover:bg-[#F5F7FA] disabled:opacity-60">
+        {busy ? <Loader2 size={13} className="animate-spin" /> : <Mail size={13} />} إعادة الإرسال بالبريد
+      </button>
+    </div>
+  );
+}
+
+export function SharePanel({ tx, link, delegations, reload }) {
   if (!link) return null;
   const wa = `https://wa.me/?text=${encodeURIComponent(`${tx.doc_type === "quote" ? "عرض السعر" : "الفاتورة"} ${tx.number}: ${link}`)}`;
   return (
@@ -22,6 +52,7 @@ export function SharePanel({ tx, link, delegations }) {
           </div>
         </div>
       </div>
+      <EmailStatus tx={tx} reload={reload} />
       {delegations?.length > 0 && (
         <div className="mt-4 border-t border-[#E2E8F0] pt-3 text-xs text-[#5A6E7F]">
           <div className="mb-1 font-semibold text-[#172B36]">محاسبون مفوّضون (لهذه المعاملة فقط)</div>
