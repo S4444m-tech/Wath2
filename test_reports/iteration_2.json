@@ -1,0 +1,51 @@
+{
+  "summary": "Verified real-email delivery feature (Emergent-managed Resend). Updated pytest suite to insert OTPs directly in MongoDB (no more demo_code) and added 6 new tests covering: background email on tx create (sending→sent), masked-only OTP response, OTP 5/hour rate limit, resend-link 60s cooldown + cross-tenant 404, delegate same-email-as-customer 400, and delegate 5-accountant cap. Overall 37/40 backend tests pass; the 3 failures (TestEmailDelivery::test_otp_rate_limit_5_per_hour, TestEmailDelivery::test_delegate_max_5_accountants_429, TestPublic::test_delegate_accountant) all collide with upstream Emergent-email provider HTTP 429 (code='rate_limited') which the backend currently converts to HTTP 502 — this is NOT an app logic bug but a mail-provider throttle and is also a minor code-review finding (see below). Frontend UI check: SharePanel renders email-status + resend-link-btn correctly on TransactionDetail (status label observed: 'فشل إرسال البريد — تعذّر إرسال البريد' while provider was rate-limiting), PublicPortal exposes otp-request-btn / otp-sent-banner (no demo code), delegate card exposes delegate-result after submit. All relevant data-testid attributes exist.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "backend/mailer.py send_email", "issue": "When Emergent email provider returns 429 with code='rate_limited', mailer surfaces HTTPException(502) 'تعذّر إرسال البريد'. This causes transactions to be marked email_status='failed' and OTP/delegate endpoints to return 502 during provider throttles. 'rate_limited' should be grouped with 'insufficient_credits/integration_disabled/daily_limit_reached' and surfaced as 503 'خدمة البريد غير متاحة مؤقتاً' (or kept as 'sending' / retried) so transient upstream throttling doesn't poison UX."},
+      {"endpoint": "/api/transactions POST", "issue": "On create, email_status is set to 'sending' synchronously, but a NEW transaction never has 'email_sent_at'. /api/transactions/{id}/send-link cooldown check uses `tx.get('email_sent_at','')`, meaning the first resend after create ALWAYS passes regardless of how recent the background send started. Minor race: a user can double-fire the initial email (background task) and resend-link within the same second. Consider stamping email_sent_at inside create_tx."},
+      {"endpoint": "/api/transactions/{id}/send-link", "issue": "Returns 404 'غير موجود' when an employee from another tenant hits it — correct, but the message in response body is intentional per spec; verified passing. (Noted here for context, not a defect.)"}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {"flow": "Public OTP request", "issue": "When mailer returns 502 due to upstream 'rate_limited', the public page shows a generic toast error with no retry affordance beyond re-clicking the button. Users may abandon. Linked to the backend mailer fix above.", "affected_selectors": ["[data-testid='otp-request-btn']", "[data-testid='otp-sent-banner']"]}
+    ],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_wathiq_api.py",
+    "/app/backend/tests/conftest.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "In backend/mailer.py send_email, add 'rate_limited' to the set of codes that raise HTTPException(503,'خدمة البريد غير متاحة مؤقتاً'); currently it falls into the generic 502 branch which marks transactions as email_status='failed' during transient provider throttles.",
+    "In routes_tx.create_tx, set 'email_sent_at': iso() when inserting the transaction so the first resend-link call still honors the 60s cooldown.",
+    "(Optional) Consider a lightweight retry inside track_tx_link for 503-class provider errors (e.g., 1 retry after 30s) before persisting email_status='failed'."
+  ],
+  "critical_code_review_comments": [
+    "mailer._assert_safe_email correctly blocks forms/credential-ask phrases and non-https links/anchors; _wrap and _button escape all interpolated values — good anti-phishing posture (G2/G3).",
+    "mailer.send_email catches HTTPStatusError and swallows the body on JSON parse errors — ok, logs the raw text. However the `code` extraction only maps 3 codes to 503; add 'rate_limited' (and arguably 'temporarily_unavailable').",
+    "routes_public.request_otp uses count_documents with 'created_at' > since (ISO string). Works because iso timestamps are lexicographically ordered, but if a timestamp ever drops the 'Z' or timezone, comparisons will silently misbehave. Consider storing as native Date in Mongo.",
+    "routes_public.request_otp marks the OTP row 'used=True' if mailing fails (good — prevents a dangling verifiable OTP). But the fallback does NOT delete the row, so it still counts toward the 5/hour cap. Acceptable (DOS mitigation) but worth documenting.",
+    "routes_public.delegate correctly rejects email==customer's email and returns ONLY masked sent_to (no token leak). Accountant token is only persisted server-side and emailed — verified by inspecting response in tests.",
+    "routes_tx.resend_link uses `tx.get('email_sent_at','')` string comparison for cooldown — works but relies on ISO ordering; minor foot-gun as noted above.",
+    "routes_tx.create_tx fires `asyncio.create_task(mailer.track_tx_link(...))` which is correct for FastAPI background work since the task is created on the running loop; however there is no reference kept, so if the server shuts down mid-task the email is lost silently. Acceptable for this scope.",
+    "SharePanel.js: EmailStatus correctly handles sending/sent/failed states with distinct colors and surfaces email_error alongside the Arabic status label (verified in browser). data-testid='email-status' and data-testid='resend-link-btn' present.",
+    "PublicPortal.js: After requesting OTP, UI switches from otp-request-btn to otp-sent-banner showing masked email — no demo code visible anywhere (verified: no 6-digit sequence in banner text).",
+    "File sizes still within healthy range; no refactor needed."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_wathiq_api.py",
+    "/app/backend/tests/conftest.py"
+  ],
+  "success_rate": {"backend": "92.5% (37/40) — 3 failures caused by upstream email-provider 429 rate limit, not app bugs", "frontend": "SharePanel + PublicPortal + Delegate render + testids verified; OTP banner path blocked by same upstream 429 during run"},
+  "test_credentials": "Used /app/memory/test_credentials.md verbatim.",
+  "seed_data_creation": "Tests create TEST_شركة_<hex> customers with email delivered@resend.dev (customer) and delivered+acc_<hex>@resend.dev (accountants) — all go to Resend's test sink. No real inboxes impacted. Direct DB OTP inserts via helper insert_known_otp() in conftest.py using bcrypt+pymongo.",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Run: python -m pytest /app/backend/tests/test_wathiq_api.py -v --junitxml=/app/test_reports/pytest/pytest_results.xml. The 3 'failures' in TestEmailDelivery::test_otp_rate_limit_5_per_hour, TestEmailDelivery::test_delegate_max_5_accountants_429, and TestPublic::test_delegate_accountant correlate with Emergent email provider returning HTTP 429 code='rate_limited' (visible in backend.err.log). After the main agent fixes mailer.py to treat 'rate_limited' as 503, those tests should be adjusted to either (a) accept 503, or (b) run with a cooldown between email-heavy tests. Note: delivered@resend.dev is Resend's always-OK test sink; delivered+acc@resend.dev variants also work. New helper insert_known_otp(token, code='135246') lives in /app/backend/tests/conftest.py — use it anywhere OTP verification is needed in tests.",
+  "rca of the issue": "Root cause of 3 failing backend tests: the Emergent-managed Resend integration is currently throttling this account — observed consecutive 429 responses with code='rate_limited' in /var/log/supervisor/backend.err.log at ~2+ emails/sec. mailer.send_email only maps 3 provider codes (insufficient_credits/integration_disabled/daily_limit_reached) to the graceful 503 path; everything else (including rate_limited) is converted to HTTPException(502) 'تعذّر إرسال البريد'. Impact: during provider throttle, (1) new transactions get email_status='failed' even though a retry would succeed, (2) OTP/delegate endpoints return 502 making the public portal unusable, and (3) the two rate-limit regression tests get a 502 BEFORE they can observe the application-level 429 cap. Mitigation: add 'rate_limited' to the 503-mapped codes in mailer.send_email, optionally add a single retry inside track_tx_link, and stamp email_sent_at at creation to tighten the resend-link cooldown."
+}

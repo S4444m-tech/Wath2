@@ -12,7 +12,7 @@ import struct
 import zlib
 import pytest
 import requests
-from conftest import BASE_URL, idem_key, _login
+from conftest import BASE_URL, idem_key, _login, insert_known_otp
 
 
 # ---------- helpers ----------
@@ -168,13 +168,12 @@ class TestTransactions:
 
 # ---------- 5. Public portal: OTP + upload + delegate ----------
 class TestPublic:
-    def _otp_session(self, token):
+    def _otp_session(self, token, code="135246"):
         s = requests.Session()
         r = s.get(f"{BASE_URL}/api/public/links/{token}")
         assert r.status_code == 200, r.text
-        r = s.post(f"{BASE_URL}/api/public/links/{token}/otp")
-        assert r.status_code == 200, r.text
-        code = r.json()["demo_code"]
+        # Insert a known OTP directly in MongoDB (real email is sent; we don't rely on demo_code).
+        insert_known_otp(token, code)
         r = s.post(f"{BASE_URL}/api/public/links/{token}/verify", json={"code": code})
         assert r.status_code == 200, r.text
         s.headers.update({"X-CSRF-Token": s.cookies.get("csrf_token")})
@@ -192,8 +191,7 @@ class TestPublic:
     def test_otp_wrong_code_rejected(self, new_tx):
         tx = new_tx()
         s = requests.Session()
-        r = s.post(f"{BASE_URL}/api/public/links/{tx['public_token']}/otp")
-        assert r.status_code == 200
+        insert_known_otp(tx["public_token"], "135246")
         r = s.post(f"{BASE_URL}/api/public/links/{tx['public_token']}/verify", json={"code": "000001"})
         assert r.status_code in (400, 429)
 
@@ -217,21 +215,35 @@ class TestPublic:
         assert r3.status_code == 415
 
     def test_delegate_accountant(self, new_tx):
-        tx = new_tx()
+        tx = new_tx(email="delivered@resend.dev")
         s = self._otp_session(tx["public_token"])
+        acc_email = f"delivered+acc_{uuid.uuid4().hex[:6]}@resend.dev"
         r = s.post(f"{BASE_URL}/api/public/session/delegate",
-                   json={"email": "acc@x.com", "name": "Accountant"},
+                   json={"email": acc_email, "name": "Accountant"},
                    headers={"X-CSRF-Token": s.cookies.get("csrf_token")})
-        assert r.status_code == 200
-        acc_token = r.json()["token"]
-        # Accountant can open with own OTP
+        assert r.status_code == 200, r.text
+        data = r.json()
+        assert "sent_to" in data and "token" not in data, f"delegate must only return masked sent_to; got {data}"
+        # Resolve accountant token from DB (not returned in response)
+        from conftest import _mongo
+        acc_link = _mongo.public_links.find_one({"transaction_id": tx["id"], "role": "accountant", "email": acc_email})
+        assert acc_link, "accountant public_link not created"
+        acc_token = acc_link["token"]
         s2 = self._otp_session(acc_token)
         r = s2.get(f"{BASE_URL}/api/public/session")
         assert r.status_code == 200 and r.json()["role"] == "accountant"
         # Accountant cannot delegate further
-        r = s2.post(f"{BASE_URL}/api/public/session/delegate", json={"email": "x@x.com"},
+        r = s2.post(f"{BASE_URL}/api/public/session/delegate", json={"email": "delivered+acc2@resend.dev"},
                     headers={"X-CSRF-Token": s2.cookies.get("csrf_token")})
         assert r.status_code == 403
+
+    def test_delegate_same_email_as_customer_400(self, new_tx):
+        tx = new_tx(email="delivered@resend.dev")
+        s = self._otp_session(tx["public_token"])
+        r = s.post(f"{BASE_URL}/api/public/session/delegate",
+                   json={"email": "delivered@resend.dev"},
+                   headers={"X-CSRF-Token": s.cookies.get("csrf_token")})
+        assert r.status_code == 400, r.text
 
 
 # ---------- 6. Review decisions ----------
@@ -497,3 +509,74 @@ class TestFileSig:
         sig = url.split("sig=")[1]
         r = requests.get(f"{BASE_URL}/api/files/{att2['id']}?sig={sig}")
         assert r.status_code == 403
+
+
+# ---------- 13. Email delivery (real Emergent-managed Resend; test addresses only) ----------
+class TestEmailDelivery:
+    """Only uses @resend.dev test inbox. Keeps send volume modest."""
+
+    def _wait_email_status(self, employee, tx_id, target=("sent", "failed"), timeout=25):
+        for _ in range(timeout):
+            d = employee.get(f"{BASE_URL}/api/transactions/{tx_id}").json()["transaction"]
+            if d.get("email_status") in target:
+                return d
+            time.sleep(1)
+        return employee.get(f"{BASE_URL}/api/transactions/{tx_id}").json()["transaction"]
+
+    def test_create_tx_background_emails_customer_link(self, employee, new_tx):
+        tx = new_tx(email="delivered@resend.dev")
+        # Initial state should be 'sending' (set synchronously in create_tx)
+        assert tx.get("email_status") == "sending"
+        final = self._wait_email_status(employee, tx["id"])
+        assert final["email_status"] == "sent", f"expected 'sent', got {final.get('email_status')} err={final.get('email_error')}"
+
+    def test_otp_endpoint_returns_masked_no_demo(self, new_tx):
+        tx = new_tx(email="delivered@resend.dev")
+        s = requests.Session()
+        r = s.post(f"{BASE_URL}/api/public/links/{tx['public_token']}/otp")
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert "demo_code" not in body, f"demo_code must NOT be in response: {body}"
+        assert body.get("channel") == "email"
+        assert "@" in body.get("sent_to", "")
+        assert body["sent_to"].startswith("de")  # masked 'delivered@resend.dev' → 'de•••••••@resend.dev'
+
+    def test_otp_rate_limit_5_per_hour(self, new_tx):
+        tx = new_tx(email="delivered@resend.dev")
+        s = requests.Session()
+        # 5 requests should succeed (also sends emails, but all to resend.dev test inbox)
+        for i in range(5):
+            r = s.post(f"{BASE_URL}/api/public/links/{tx['public_token']}/otp")
+            assert r.status_code == 200, f"attempt {i+1}: {r.status_code} {r.text}"
+        r = s.post(f"{BASE_URL}/api/public/links/{tx['public_token']}/otp")
+        assert r.status_code == 429, f"expected 429 on 6th request, got {r.status_code}"
+
+    def test_resend_link_cooldown_429(self, employee, new_tx):
+        tx = new_tx(email="delivered@resend.dev")
+        # wait for initial email to settle
+        self._wait_email_status(employee, tx["id"])
+        r1 = employee.post(f"{BASE_URL}/api/transactions/{tx['id']}/send-link")
+        assert r1.status_code == 200, r1.text
+        r2 = employee.post(f"{BASE_URL}/api/transactions/{tx['id']}/send-link")
+        assert r2.status_code == 429, f"expected 429 cooldown, got {r2.status_code}"
+
+    def test_resend_link_cross_tenant_404(self, new_tx, employee_b):
+        tx = new_tx(email="delivered@resend.dev")
+        r = employee_b.post(f"{BASE_URL}/api/transactions/{tx['id']}/send-link")
+        assert r.status_code == 404
+
+    def test_delegate_max_5_accountants_429(self, new_tx):
+        tx = new_tx(email="delivered@resend.dev")
+        from test_wathiq_api import TestPublic
+        s = TestPublic()._otp_session(tx["public_token"])
+        for i in range(5):
+            r = s.post(f"{BASE_URL}/api/public/session/delegate",
+                       json={"email": f"delivered+acc{i}_{uuid.uuid4().hex[:4]}@resend.dev"},
+                       headers={"X-CSRF-Token": s.cookies.get("csrf_token")})
+            assert r.status_code == 200, f"attempt {i+1}: {r.status_code} {r.text}"
+            assert "token" not in r.json()
+        r = s.post(f"{BASE_URL}/api/public/session/delegate",
+                   json={"email": f"delivered+acc6_{uuid.uuid4().hex[:4]}@resend.dev"},
+                   headers={"X-CSRF-Token": s.cookies.get("csrf_token")})
+        assert r.status_code == 429, f"expected 429 on 6th accountant, got {r.status_code}"
+

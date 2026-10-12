@@ -1,8 +1,36 @@
 import os
 import time
 import uuid
+import hashlib
 import pytest
 import requests
+import bcrypt
+from datetime import datetime, timezone, timedelta
+from pymongo import MongoClient
+
+MONGO_URL = os.environ.get("MONGO_URL") or "mongodb://localhost:27017"
+DB_NAME = os.environ.get("DB_NAME") or "test_database"
+_mongo = MongoClient(MONGO_URL)[DB_NAME]
+
+
+def insert_known_otp(token: str, code: str = "135246") -> str:
+    """Insert a bcrypt-hashed OTP directly in MongoDB for a public link token.
+
+    Returns the inserted code. The latest unused OTP wins at verify time.
+    """
+    tok_hash = hashlib.sha256(token.encode()).hexdigest()
+    link = _mongo.public_links.find_one({"token_hash": tok_hash})
+    assert link, f"no public_link for token_hash {tok_hash}"
+    now = datetime.now(timezone.utc)
+    _mongo.otps.insert_one({
+        "link_id": link["id"],
+        "code_hash": bcrypt.hashpw(code.encode(), bcrypt.gensalt(rounds=10)).decode(),
+        "attempts": 0,
+        "used": False,
+        "expires_at": (now + timedelta(minutes=10)).isoformat().replace("+00:00", "Z"),
+        "created_at": now.isoformat().replace("+00:00", "Z"),
+    })
+    return code
 
 BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://sadad-flow.preview.emergentagent.com").rstrip("/")
 

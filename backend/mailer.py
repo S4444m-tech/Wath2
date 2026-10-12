@@ -1,5 +1,6 @@
 import os
 import re
+import asyncio
 import ipaddress
 import logging
 import httpx
@@ -105,6 +106,9 @@ async def send_email(*, to: str, subject: str, html: str) -> str | None:
             code = e.response.json().get("code", "")
         except ValueError:
             code = ""
+        if code == "rate_limited" or e.response.status_code == 429:
+            logger.warning(f"Email throttled: {e.response.text}")
+            raise HTTPException(503, "ضغط مؤقت على خدمة البريد، حاول بعد دقيقة")
         if code in ("insufficient_credits", "integration_disabled", "daily_limit_reached"):
             logger.warning(f"Email paused: {code} ({e.response.status_code}): {e.response.text}")
             raise HTTPException(503, "خدمة البريد غير متاحة مؤقتاً")
@@ -170,7 +174,13 @@ async def send_delegation(to, factory, tx, token, customer_name):
 async def track_tx_link(tenant_id, tx, token, factory):
     """Send the customer link and record delivery status on the transaction."""
     try:
-        eid = await send_tx_link(tx["customer"]["email"], factory, tx, token)
+        try:
+            eid = await send_tx_link(tx["customer"]["email"], factory, tx, token)
+        except HTTPException as e:
+            if e.status_code != 503:
+                raise
+            await asyncio.sleep(30)
+            eid = await send_tx_link(tx["customer"]["email"], factory, tx, token)
         upd = {"email_status": "sent", "email_id": eid, "email_error": None}
     except HTTPException as e:
         upd = {"email_status": "failed", "email_error": e.detail}

@@ -5,7 +5,7 @@
 
 ## User choices
 - Login: username + 6-digit PIN (agent advised: bcrypt, lockout 5 fails/15 min, weak PINs rejected)
-- Email OTP: MOCKED — code shown on screen
+- Email OTP: real email via Emergent-managed Resend (was mocked in v1)
 - File storage: "local server" → implemented in MongoDB GridFS (pod disk is lost when deployed)
 - Daftra: mocked connector behind interface until API key arrives
 - Product name: وَثيق
@@ -31,10 +31,16 @@ Employee (issues quotes), Supervisor (confirms money remotely), Factory manager 
 - Super-admin: tenants create (temp manager PIN), suspend, plans, subscription period, integration health
 - Testing: 33/33 backend tests passed, frontend smoke passed (iteration_1)
 
+## Implemented (2026-10-12)
+- Real email (Emergent-managed Resend, backend/mailer.py with safety gate + fixed Arabic RTL templates): customer link emailed automatically on issue (email_status sending/sent/failed shown in SharePanel + resend button with 60s cooldown), OTP code emailed (no longer returned in API), accountant delegation link emailed (max 5 per transaction, can't reuse customer email)
+- Provider throttling (429) → 503 with Arabic message; background link email retries once after 30s
+- Testing iteration_2: 37/40 passed; 3 failures were from the email provider's rate limit during the test run (now handled as 503), not app logic
+- Env: EMERGENT_EMAIL_KEY, EMAIL_FROM_NAME=وثيق, PUBLIC_APP_URL (must be updated to the production domain on deploy)
+
 ## Backlog
-- P0: Real email OTP (Resend), live Daftra API wiring + confirm posting matrix against real API
+- P0: Live Daftra API wiring + confirm posting matrix against real API
 - P1: Replace scan stub with ClamAV, HEIC preview conversion, KSA in-Kingdom hosting, MongoDB replica set for true multi-doc transactions
 - P2 (phase 2): purchasing/supplier cycle, OCR, bank statement matching, payment gateway, permanent customer portal, SMS/WhatsApp OTP
 
 ## Next tasks
-- Collect Daftra API credentials; enable Resend for OTP delivery
+- Collect Daftra API credentials; set PUBLIC_APP_URL to production domain at deploy

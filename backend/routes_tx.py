@@ -88,7 +88,7 @@ async def create_tx(body: TxIn, u=Depends(roles(*STAFF))):
         "number": number, "doc_type": body.doc_type, "customer": body.customer.model_dump(), "items": items,
         "notes": body.notes, "due_date": body.due_date, "subtotal": sub, "vat": vat, "total": total,
         "confirmed": 0, "remaining": total, "credit": 0, "payment_status": "issued", "has_pending": False,
-        "is_advance": False, "version": 1, "needs_rereview": False, "daftra_status": "not_synced", "email_status": "sending",
+        "is_advance": False, "version": 1, "needs_rereview": False, "daftra_status": "not_synced", "email_status": "sending", "email_sent_at": iso(),
         "created_by": actor_of(u), "issued_at": iso(),
     })
     token = secrets.token_urlsafe(32)
