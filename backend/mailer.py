@@ -171,6 +171,48 @@ async def send_delegation(to, factory, tx, token, customer_name):
     return await send_email(to=to, subject=f"تفويض لرفع إيصال {tx['number']} — {factory}", html=_wrap(factory, inner))
 
 
+async def send_payment_confirmed(to, factory, tx, amount, token):
+    url = f"{APP_URL}/p/{token}"
+    remaining = tx["remaining"]
+    if tx["credit"] > 0:
+        tail = f'<p>يوجد مبلغ زائد بقيمة <strong>{tx["credit"] / 100:,.2f} ر.س</strong> مسجّل كرصيد دائن لصالحكم.</p>'
+    elif remaining == 0:
+        tail = '<p style="color:#047857;font-weight:bold">تم سداد المبلغ بالكامل. شكراً لكم.</p>'
+    else:
+        tail = f'<p>المتبقي للسداد: <strong>{remaining / 100:,.2f} ر.س</strong></p>'
+    row = lambda k, v: f'<tr><td style="padding:6px 0;color:#5A6E7F">{k}</td><td style="padding:6px 0;text-align:left;font-weight:bold;direction:ltr">{v / 100:,.2f} ر.س</td></tr>'
+    inner = (f'<p>مرحباً {escape(tx["customer"]["name"])}،</p>'
+             f'<p>تم تأكيد وصول دفعتكم على {doc_label(tx["doc_type"])} <strong>{escape(tx["number"])}</strong> إلى حساب {escape(factory)}.</p>'
+             '<table role="presentation" width="100%" style="border-top:1px solid #E2E8F0;border-bottom:1px solid #E2E8F0;margin:12px 0">'
+             f'{row("المبلغ المؤكد الآن", amount)}'
+             f'{row("إجمالي المؤكد", tx["confirmed"])}'
+             f'{row("إجمالي المستند", tx["total"])}'
+             f'{row("المتبقي", remaining)}'
+             '</table>'
+             f'{tail}{_button(url, "عرض حالة المعاملة")}')
+    return await send_email(to=to, subject=f"تأكيد استلام دفعة {tx['number']} — {factory}", html=_wrap(factory, inner))
+
+
+async def track_payment_confirmed(tenant_id, tx_id, allocation_id, amount):
+    """Email the customer after a confirmation; status stored on the allocation."""
+    tx = await db.transactions.find_one({"tenant_id": tenant_id, "id": tx_id}, {"_id": 0})
+    link = await db.public_links.find_one({"tenant_id": tenant_id, "transaction_id": tx_id, "role": "customer"}, {"_id": 0})
+    tenant = await db.tenants.find_one({"id": tenant_id}, {"_id": 0, "name": 1})
+    try:
+        try:
+            await send_payment_confirmed(tx["customer"]["email"], tenant["name"], tx, amount, link["token"])
+        except HTTPException as e:
+            if e.status_code != 503:
+                raise
+            await asyncio.sleep(30)
+            await send_payment_confirmed(tx["customer"]["email"], tenant["name"], tx, amount, link["token"])
+        status = "sent"
+    except Exception as e:
+        logger.error(f"confirmation email error: {getattr(e, 'detail', e)}")
+        status = "failed"
+    await db.allocations.update_one({"tenant_id": tenant_id, "id": allocation_id}, {"$set": {"email_status": status}})
+
+
 async def track_tx_link(tenant_id, tx, token, factory):
     """Send the customer link and record delivery status on the transaction."""
     try:

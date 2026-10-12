@@ -6,6 +6,8 @@ from core import db, Scoped, roles, actor_of, audit, notify, idempotent, save_id
 from ledger import recompute
 from attachments import clean_att
 import daftra
+import mailer
+import asyncio
 
 router = APIRouter(prefix="/api")
 REVIEWERS = ("supervisor", "manager")
@@ -109,6 +111,9 @@ async def _confirm(s: Scoped, u, att, body: DecisionIn):
     for tid in ids:
         t = await recompute(s, tid)
         await notify(s.tid, ["employee", "supervisor", "manager"], tid, f"تم تأكيد وصول {txs[tid]['number']} - المتبقي {t['remaining'] / 100:.2f} ر.س")
+    for a in allocs:
+        await s.update("allocations", {"id": a["id"]}, {"$set": {"email_status": "sending"}})
+        asyncio.create_task(mailer.track_payment_confirmed(s.tid, a["transaction_id"], a["id"], a["amount"]))
     await audit(s.tid, actor_of(u), "payment_confirmed", att["transaction_id"], {"movement": movement["reference"], "amount": mv.amount, "allocations": [a.model_dump() for a in body.allocations]})
     return {"status": "confirmed", "movement_id": movement["id"]}
 

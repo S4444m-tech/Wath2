@@ -35,6 +35,7 @@ Employee (issues quotes), Supervisor (confirms money remotely), Factory manager 
 - Real email (Emergent-managed Resend, backend/mailer.py with safety gate + fixed Arabic RTL templates): customer link emailed automatically on issue (email_status sending/sent/failed shown in SharePanel + resend button with 60s cooldown), OTP code emailed (no longer returned in API), accountant delegation link emailed (max 5 per transaction, can't reuse customer email)
 - Provider throttling (429) → 503 with Arabic message; background link email retries once after 30s
 - Testing iteration_2: 37/40 passed; 3 failures were from the email provider's rate limit during the test run (now handled as 503), not app logic
+- Payment-confirmed email to customer: sent automatically after each supervisor confirmation (per allocated document) with amount confirmed now, total confirmed, document total, remaining, overpayment credit / fully-paid message + link; status (sending/sent/failed) shown per row in the ledger panel
 - Env: EMERGENT_EMAIL_KEY, EMAIL_FROM_NAME=وثيق, PUBLIC_APP_URL (must be updated to the production domain on deploy)
 
 ## Backlog
